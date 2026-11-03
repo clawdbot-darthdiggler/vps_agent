@@ -1,6 +1,6 @@
 # VPS Agent — Android coding-agent manager
 
-Initial Hermes/OpenClaw connection manager for Docker agents on a VPS. Package identity remains `com.progboy.hermeslink` so the original app's encrypted settings can migrate. This is a connection-management milestone, not yet a full interactive agent terminal or native task dashboard. The chef variant is out of scope.
+Hermes/OpenClaw connection manager for Docker agents on a VPS. The M3 build (version 1.1.0, code 2) adds separate Hosts and Agents screens: configure VPS SSH settings once and attach multiple agents with independent web credentials. Package identity remains `com.progboy.hermeslink` so existing encrypted settings can migrate. This is not yet a full interactive agent terminal or native task dashboard. The chef variant is out of scope.
 
 ## Build
 
@@ -17,12 +17,22 @@ The original Gradle build committed an AAPT2 override pointing at another machin
 ## Configure an agent
 
 1. Connect the **Tailscale Android app** to the tailnet that contains your Hostinger VPS. This application does not install/configure Tailscale, change ACLs or provision the server.
-2. Create a named **Hermes** or **OpenClaw** profile. Multiple profiles are retained; save before switching. Loading another profile or choosing New deliberately discards unsaved edits.
-3. For SSH, enter the **VPS host/IP, SSH port, machine username and machine password**. These are not the agent web credentials. Password authentication must be allowed by your server's SSH policy. SSH keys and Tailscale SSH's browser-based authentication flow are not implemented in this milestone.
+2. Open **Hosts → Add host**. Give your VPS a name and save its SSH settings. Then use **Agents → Add agent**, select **Hermes** or **OpenClaw**, and explicitly choose the saved host. Multiple agents can share it. Save before navigating away; leaving an editor discards unsaved edits.
+3. In **Host details**, enter the **VPS host/IP, SSH port, machine username and machine password**. These are not the agent web credentials. Editing this host updates the settings resolved by every linked agent. Password authentication must be allowed by your server's SSH policy. SSH keys and Tailscale SSH's browser-based authentication flow are not implemented in this milestone.
 4. Enter an independently verified **SHA256 SSH host-key fingerprint**. Obtain it from a trusted server console/admin channel, not from an unverified network connection. The app refuses a different presented key. If the server has multiple key types, the pin must match the key negotiated by this client's SSH implementation; key-type selection is a future improvement. Never bypass validation to make a connection succeed.
 5. Optionally enter the exact Docker container name. The VPS account needs Docker permission; the app does not invoke sudo or change group membership. Docker access carries substantial host privileges. Use a least-privileged account where practical.
 6. Enter the dashboard's **actual HTTPS URL**. No provider-specific host, port, token exchange or login endpoint is invented. Configure a trusted HTTPS reverse proxy or suitable private HTTPS endpoint separately; HTTP-only endpoints are deliberately rejected.
-7. Choose **Save & open dashboard in browser** for the provider's own login/pairing process, or **Save & open SSH controls**. On the SSH screen explicitly choose VPS shell or Docker shell; merely opening the screen executes no remote command.
+7. Save the agent, then use its card's **Open dashboard** or **Open SSH controls** action. The preferred-access setting is displayed metadata; both actions remain available. On the SSH screen explicitly choose VPS shell or Docker shell; merely opening the screen executes no remote command. Cards do not claim agents are online: connection status has not been checked.
+
+Deleting an agent leaves its host intact. Deleting a host still referenced by agents is blocked; first reassign or delete those agents.
+
+### M3 upgrade and recovery policy
+
+Existing flat v2 profiles migrate to one host per agent, preserving the agent IDs and separate secrets. Equal hostnames are **not** automatically merged because credentials may differ. To share one host after migration, explicitly reassign agents in their editors and delete only the now-unused duplicate hosts.
+
+The migration writes the complete encrypted v3 state in one preference transaction and initially retains the encrypted v2 source as recovery evidence. The first successful v3 mutation—including selecting an agent to open—removes the stale v2 source in the same transaction. Corrupt or future-version v3 data fails closed: it is never automatically replaced with old credentials. There is no user-facing recovery/import screen yet; do not clear app data to work around a migration error. The ambiguous pre-v2 password archive remains separately forgettable.
+
+Downgrading to the old build is **not a supported data rollback**: it cannot read v3, and the v2 source may already have been retired. Keep the existing signing key for updates; uninstalling loses encrypted data.
 
 ### Credentials and browser sessions
 
@@ -57,4 +67,4 @@ adb shell am instrument -w -r com.progboy.hermeslink.test/androidx.test.runner.A
 
 Check the runner's `OK (...)` result, not just adb's exit status: adb can exit zero even when tests fail.
 
-See `MILESTONES.md` for verified acceptance and the hands-on checklist. Successful compilation/device-local tests do **not** establish access to your real VPS or provider deployments.
+See `milestone.md` for the implementation roadmap, verified acceptance and hands-on checklists. Successful compilation/device-local tests do **not** establish access to your real VPS or provider deployments.

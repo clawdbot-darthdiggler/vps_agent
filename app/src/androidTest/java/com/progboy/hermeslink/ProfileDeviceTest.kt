@@ -55,6 +55,8 @@ class ProfileDeviceTest {
         } finally {
             SettingsStore.delete(context, first.id)
             SettingsStore.delete(context, second.id)
+            SettingsStore.deleteHost(context, "legacy-host-${first.id}")
+            SettingsStore.deleteHost(context, "legacy-host-${second.id}")
         }
     }
 
@@ -73,8 +75,18 @@ class ProfileDeviceTest {
                         instrumentation.runOnMainSync {
                             fun children(v: View): List<View> = listOf(v) +
                                 if (v is ViewGroup) (0 until v.childCount).flatMap { children(v.getChildAt(it)) } else emptyList()
-                            val values = children(activity.window.decorView).filterIsInstance<EditText>().map { it.text.toString() }
-                            loaded = profile.name in values && profile.sshHost in values && profile.sshPassword in values
+                            val all = children(activity.window.decorView)
+                            val edit = all.find { it.contentDescription == "edit_agent_${profile.id}" }
+                            if (edit?.isEnabled == true) edit.performClick()
+                            val agentName = children(activity.window.decorView).filterIsInstance<EditText>()
+                                .any { it.contentDescription == "agent_name" && it.text.toString() == profile.name }
+                            if (agentName) {
+                                children(activity.window.decorView).find { it.contentDescription == "hosts_tab" }!!.performClick()
+                                val hostId = "legacy-host-${profile.id}"
+                                children(activity.window.decorView).find { it.contentDescription == "edit_host_$hostId" }!!.performClick()
+                                val values = children(activity.window.decorView).filterIsInstance<EditText>().map { it.text.toString() }
+                                loaded = profile.sshHost in values && profile.sshPassword in values
+                            }
                         }
                         if (!loaded) Thread.sleep(100)
                     }
@@ -84,6 +96,6 @@ class ProfileDeviceTest {
                     instrumentation.waitForIdleSync()
                 }
             }
-        } finally { SettingsStore.delete(context, profile.id) }
+        } finally { SettingsStore.delete(context, profile.id); SettingsStore.deleteHost(context, "legacy-host-${profile.id}") }
     }
 }
