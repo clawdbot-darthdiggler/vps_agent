@@ -8,7 +8,7 @@ The coding manager comes first. A chef-assistant variant is deferred until the s
 
 **Status:** proposed roadmap, not approval of every design choice or a claim that future features exist.
 **Published baseline:** `fa7284380f2c48f3eb391f70e2887f4cca1a6354` on `fix/android-agent-manager`.
-**Current milestone:** M4 implementation, automated verification and independent review are complete. Remaining coding-manager milestones are authorized; M5 terminal feasibility and M6–M9 design discovery are underway. Real-phone/VPS acceptance remains pending. M8 native adapters remain conditional on verified deployment interfaces.
+**Current milestone:** M5 implementation, automated verification and independent review are complete; version 1.3.0/code 4 is ready for field testing. M6 has a separately tested scratch prototype, not Android integration; M6–M9 remain unfinished. Real-phone/VPS acceptance remains pending. M8 native adapters remain conditional on verified deployment interfaces. See `docs/M5-terminal-decision.md` for terminal evidence, licensing and limitations.
 
 ## Delivery rules
 
@@ -28,7 +28,7 @@ The coding manager comes first. A chef-assistant variant is deferred until the s
 | M2 | Initial saved agent connections | Complete, bounded | Passed at baseline | Pending on phone/VPS |
 | M3 | Hosts + Agents manager UI and safe migration | Complete; independent review passed | 11 JVM + 14 API29 device tests passed | Pending |
 | M4 | Connection diagnostics and credential lifecycle | Complete; independent review passed | 24 JVM + 46 API29 device tests, zero skips; lint 0 errors / 38 warnings | Pending real phone/VPS |
-| M5 | Interactive SSH/Docker agent terminal | Component feasibility in progress | Not yet verified | Pending |
+| M5 | Interactive SSH/Docker agent terminal | Implemented; independent review passed | 32 JVM + 62 API29 device tests, zero skips; lint 0 errors, 47 app + 17 terminal warnings | Pending real phone/VPS/provider acceptance |
 | M6 | Reattachable remote sessions | Planned | Not run | Pending |
 | M7 | Browser connection completion and login UX | Planned | Not run | Pending |
 | M8A | Native Hermes tasks, if supported by deployment | Optional post-MVP, discovery-gated | Not run | Pending |

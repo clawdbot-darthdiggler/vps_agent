@@ -1,6 +1,6 @@
 # VPS Agent — Android coding-agent manager
 
-Hermes/OpenClaw connection manager for Docker agents on a VPS. The M4 build (version 1.2.0, code 3) adds connection diagnostics, RSA PEM private-key authentication, explicit credential retention/removal, and an optional local device-authentication gate. Separate Hosts and Agents screens let multiple agents share VPS SSH settings without sharing web credentials. Package identity remains `com.progboy.hermeslink` so existing encrypted settings can migrate. This is not yet a full interactive agent terminal or native task dashboard. The chef variant is out of scope.
+Hermes/OpenClaw connection manager for Docker agents on a VPS. The M5 build (version 1.3.0, code 4) adds an interactive SSH/Docker PTY terminal, preserving M4 connection diagnostics, RSA PEM private-key authentication, explicit credential retention/removal, and the optional local device-authentication gate. Separate Hosts and Agents screens let multiple agents share VPS SSH settings without sharing web credentials. Package identity remains `com.progboy.hermeslink` so existing encrypted settings can migrate. The terminal uses a real ANSI renderer; real VPS/provider acceptance and native task dashboards remain separate work. The chef variant is out of scope.
 
 ## Build
 
@@ -22,7 +22,7 @@ The original Gradle build committed an AAPT2 override pointing at another machin
 4. Enter an independently verified **SHA256 SSH host-key fingerprint**, select its RSA or supported ECDSA key type, and check the independent-verification confirmation. Obtain both from a trusted server console/admin channel, not from an unverified connection. Changing an existing pin also requires explicit replacement confirmation. RSA host keys use SHA-2 signatures. Legacy pins remain usable with their previous matching behavior; select and independently confirm a key type when editing them. Never bypass validation to make a connection succeed.
 5. Optionally enter the exact Docker container name. The VPS account needs Docker permission; the app does not invoke sudo or change group membership. Docker access carries substantial host privileges. Use a least-privileged account where practical.
 6. Enter the dashboard's **actual HTTPS URL**. No provider-specific host, port, token exchange or login endpoint is invented. Configure a trusted HTTPS reverse proxy or suitable private HTTPS endpoint separately; HTTP-only endpoints are deliberately rejected.
-7. Save the agent, then use its card's **Open dashboard** or **Open SSH controls** action. The preferred-access setting is displayed metadata; both actions remain available. On the SSH screen explicitly choose VPS shell or Docker shell; merely opening the screen executes no remote command. Cards do not claim agents are online: connection status has not been checked.
+7. Save the agent, then use its card's **Open dashboard** or **Open SSH controls** action. The preferred-access setting is displayed metadata; both actions remain available. On the SSH screen explicitly choose Host shell or Container shell; merely opening the screen executes no remote command. Cards do not claim agents are online: connection status has not been checked.
 
 Deleting an agent leaves its host intact. Deleting a host still referenced by agents is blocked; first reassign or delete those agents.
 
@@ -52,11 +52,15 @@ Downgrading to the old build is **not a supported data rollback**: it cannot rea
 - **Preview diagnostic report / export** shows the exact export before opening the system save picker. Reports are constructed only from format version, fixed stage/code names and bounded elapsed times—not endpoints, usernames, keys, credentials, raw exceptions or shell output.
 - M4 retains schema v3 with optional fields for compatibility. Existing M3 records load without resetting credentials. Future/corrupt schemas still fail closed.
 
-### Terminal limits
+### M5 interactive terminal
 
-The current terminal is a **line-oriented, non-PTY shell**, not ANSI terminal emulation. It supports shell commands and noninteractive coding-agent commands, streams stdout/stderr, keeps only bounded output, and preserves UTF-8 across network chunks. Docker launch uses a validated container name in `docker exec -i NAME /bin/sh`. Nothing is automatically run on connection except the explicitly selected shell.
+Choose **Host shell**, **Container shell**, or **Launch agent** explicitly. Opening the screen does not connect or send commands. The native Termux terminal components provide ANSI cursor/color rendering, Unicode, scrollback and selection/copy. Tap the terminal for the keyboard; swipe the control row for Ctrl, Esc, Tab, arrows and Ctrl-C. Ctrl is a one-key latch. Clipboard/IME multiline paste requires confirmation for LF **or CR**; remote OSC52 clipboard access and automatic links are disabled. Paste is limited to 4000 UTF-8 bytes.
 
-Full-screen Hermes/OpenClaw TUIs, interactive prompts, Ctrl-C/terminal control keys, SSH tunnels, reconnect/session persistence and native task/session APIs are not implemented yet. Use the provider web UI for interactive work in this milestone. Leaving the SSH screen disconnects; this is not a background execution/session guarantee. Output may contain secrets printed by remote programs even though typed commands are not echoed by the app.
+**Launch agent** requires the exact installed command, literal arguments as a JSON array (for example `["--help"]` only if documented by that installed program), and an optional absolute container working directory. No Hermes/OpenClaw CLI is guessed. **Locate (read only)** explicitly opens a new PTY to run `command -v` and `pwd` via container `/bin/sh`; it does not execute the provider program or determine its version/API. Configuration is transient and is cleared when the dialog/screen closes. Every command/argument/workdir is validated and shell-quoted. Container access uses `docker exec -it`; no sudo, Docker installation or permission changes occur.
+
+**Leaving, locking or rotating disconnects and clears the terminal.** Returning starts disconnected, without retries or reattachment. This may not stop remote work. M6 persistence/background execution and SSH tunnels are not implemented. Scrollback and transport queues are bounded; extended SSH stderr is shown separately from the ANSI stdout stream. Output can contain secrets printed by remote programs; the app never adds a local echo.
+
+The renderer and real SSH PTY path are tested against a controlled synthetic peer, not the user's VPS. Docker argv tests do not execute real Docker or Hermes/OpenClaw. See `docs/M5-terminal-decision.md` for design, lifecycle, safety boundaries, accessibility/phone acceptance and limitations. Third-party licenses/attribution and modification notices ship in `terminal/src/main/assets/terminal-notices/`; the independent app is not relicensed.
 
 ## Tests
 
@@ -75,6 +79,6 @@ adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell am instrument -w -r com.progboy.hermeslink.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-Check the runner's `OK (...)` result, not just adb's exit status: adb can exit zero even when tests fail.
+Check the runner's `OK (...)` result, not just adb's exit status: adb can exit zero even when tests fail. These generic commands omit opt-in SSH and device-credential fixtures. For the complete zero-skip M4/M5 suite, follow `scripts/README.md` and run `scripts/run_device_tests.py` with both `--fixture-json` and `--device-credential-fixture` on an unsecured disposable emulator. The runner restores its temporary device-lock fixture and removes the injected synthetic credentials.
 
 See `milestone.md` for the implementation roadmap, verified acceptance and hands-on checklists. Successful compilation/device-local tests do **not** establish access to your real VPS or provider deployments.

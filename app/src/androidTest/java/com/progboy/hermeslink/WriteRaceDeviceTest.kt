@@ -1,70 +1,52 @@
 package com.progboy.hermeslink
 
-import android.content.Intent
-import android.widget.EditText
-import android.widget.TextView
-import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
-import org.junit.runner.RunWith
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.io.OutputStream
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import java.io.*
+import java.util.concurrent.*
 
-@RunWith(AndroidJUnit4::class)
+/** M4 regression moved from deleted Activity-owned writer fields to the M5 I/O owner. */
 class WriteRaceDeviceTest {
     @Test fun cancelledBlockedWriteCannotDisconnectReplacementConnection() {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, TerminalActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as TerminalActivity
-        fun field(name: String) = TerminalActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
-        fun call(name: String) = TerminalActivity::class.java.getDeclaredMethod(name).apply { isAccessible = true }.invoke(activity)
-        val entered = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        val replacement = ByteArrayOutputStream()
-        val blocked = object : OutputStream() {
-            override fun write(value: Int) {
+        val ins=InstrumentationRegistry.getInstrumentation()
+        val entered=CountDownLatch(1); val release=CountDownLatch(1); val oldFinished=CountDownLatch(1)
+        val oldConnected=CountDownLatch(1); val newConnected=CountDownLatch(1); val newWritten=CountDownLatch(1)
+        val states=CopyOnWriteArrayList<String>(); val replacement=ByteArrayOutputStream()
+        val blocked=object:OutputStream() {
+            override fun write(value:Int) {
                 entered.countDown()
-                check(release.await(10, TimeUnit.SECONDS)) { "Test did not release writer" }
-                throw IOException("Old disconnected socket")
+                try { check(release.await(10,TimeUnit.SECONDS)); throw IOException("Old disconnected socket") }
+                finally {oldFinished.countDown()}
             }
         }
+        var opened=0
+        val controller=TerminalController(open={ _,_,_,op ->
+            val first=++opened==1
+            val peer=object:PtyPeer {
+                override val input=ByteArrayInputStream(byteArrayOf())
+                override val errors=ByteArrayInputStream(byteArrayOf())
+                override val output=if(first) blocked else object:OutputStream() {
+                    override fun write(value:Int) {replacement.write(value);if(replacement.size()=="new command\n".length)newWritten.countDown()}
+                }
+                @Volatile override var closed=false
+                override val exitStatus=0
+                override fun resize(size:TerminalSize) {}
+            }
+            op.own {peer.closed=true}; peer
+        },onOutput={},onState={state -> states.add(state); if(state.startsWith("Connected")) {if(opened==1)oldConnected.countDown() else newConnected.countDown()} })
         try {
-            lateinit var oldJob: Job
-            instrumentation.runOnMainSync {
-                field("writer").set(activity, blocked)
-                (field("input").get(activity) as EditText).setText("old command")
-                call("sendLine")
-                oldJob = field("writeJob").get(activity) as Job
-            }
-            assertTrue("Write never blocked", entered.await(5, TimeUnit.SECONDS))
-            var replacementGeneration = -1
-            instrumentation.runOnMainSync {
-                call("disconnect") // Cancels the old job while its blocking I/O is still running.
-                replacementGeneration = field("generation").getInt(activity)
-                field("writer").set(activity, replacement)
-            }
-            release.countDown()
-            runBlocking { withTimeout(5000) { oldJob.join() } }
-            instrumentation.runOnMainSync {
-                assertEquals("Stale failure advanced new connection generation", replacementGeneration, field("generation").getInt(activity))
-                assertSame("Stale failure cleared new writer", replacement, field("writer").get(activity))
-                assertFalse((field("outputView").get(activity) as TextView).text.contains("Send failed"))
-                (field("input").get(activity) as EditText).setText("new command")
-                call("sendLine")
-                oldJob = field("writeJob").get(activity) as Job
-            }
-            runBlocking { withTimeout(5000) { oldJob.join() } }
-            assertEquals("new command\n", replacement.toString("UTF-8"))
-        } finally {
-            release.countDown()
-            instrumentation.runOnMainSync { activity.finish() }
-        }
+            ins.runOnMainSync {controller.connect(AgentProfile(),null,TerminalSize(80,24,8,20))}
+            assertTrue(oldConnected.await(5,TimeUnit.SECONDS))
+            ins.runOnMainSync {assertTrue(controller.send("old command\n".toByteArray()))}
+            assertTrue(entered.await(5,TimeUnit.SECONDS))
+            ins.runOnMainSync {controller.connect(AgentProfile(),null,TerminalSize(80,24,8,20))}
+            assertTrue(newConnected.await(5,TimeUnit.SECONDS))
+            release.countDown(); assertTrue(oldFinished.await(5,TimeUnit.SECONDS))
+            ins.runOnMainSync {assertTrue(controller.send("new command\n".toByteArray()))}
+            assertTrue(newWritten.await(5,TimeUnit.SECONDS))
+            assertEquals("new command\n",replacement.toString("UTF-8"))
+            assertFalse(states.any {it.startsWith("Failed")})
+        } finally {release.countDown();ins.runOnMainSync {controller.close()}}
     }
 }

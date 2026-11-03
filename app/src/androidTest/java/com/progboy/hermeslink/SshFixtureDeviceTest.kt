@@ -31,19 +31,31 @@ class SshFixtureDeviceTest {
         SettingsStore.saveHost(context, h)
         val a = AgentRecord(id = "m4-terminal-agent", hostId = h.id, container = "test-container")
         SettingsStore.saveAgent(context, a)
+        var state=""
         val activity = ins.startActivitySync(android.content.Intent(context, TerminalActivity::class.java).putExtra("profile_id", a.id).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) as TerminalActivity
         try {
-            ins.runOnMainSync { TerminalActivity::class.java.getDeclaredMethod("connect", Boolean::class.javaPrimitiveType).apply { isAccessible = true }.invoke(activity, true) }
+            // Access checks are asynchronous. Clicking before authorization is deliberately ignored.
+            var ready=false; val readyDeadline=System.currentTimeMillis()+10000
+            while(!ready && System.currentTimeMillis()<readyDeadline) {
+                ins.runOnMainSync {ready=TerminalActivity::class.java.getDeclaredField("ready").apply {isAccessible=true}.getBoolean(activity)}
+                Thread.sleep(25)
+            }
+            assertTrue("Terminal access check did not finish",ready)
+            ins.runOnMainSync {
+                val views=ArrayList<android.view.View>()
+                activity.window.decorView.findViewsWithText(views,"Container shell",android.view.View.FIND_VIEWS_WITH_TEXT)
+                views.filterIsInstance<android.widget.Button>().single().performClick()
+            }
             val end = System.currentTimeMillis() + 15000
             var connected = false
             while (System.currentTimeMillis() < end && !connected) {
                 ins.runOnMainSync {
                     val output = TerminalActivity::class.java.getDeclaredField("outputView").apply { isAccessible = true }.get(activity) as android.widget.TextView
-                    connected = output.text.contains("[Connected:")
+                    state=output.text.toString(); connected = state.contains("[Connected:")
                 }
                 Thread.sleep(50)
             }
-            assertTrue("Actual terminal failed key-authenticated connection", connected)
+            assertTrue("Actual terminal failed key-authenticated connection; state=$state", connected)
         } finally { ins.runOnMainSync { activity.finish() }; SettingsStore.delete(context, a.id); SettingsStore.deleteHost(context, h.id) }
     }
     @Test fun passwordAndDockerSuccess() { val j = fixture(); check(profile(j), DiagnosticStage.CONTAINER, DiagnosticCode.OK) }

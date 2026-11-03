@@ -29,6 +29,22 @@ python scripts/check_ssh_fixture.py /your/scratch/m4-fixture/m4-ssh-fixture.json
 
 This checks positive/negative authentication, encrypted-key use, command rejection, simulated Docker results, stalled handshake and algorithm mismatch. This host-side check is **not** a substitute for Android/JSch tests.
 
+M5 also provides a deterministic **kernel-backed PTY** stream (POSIX/Linux host required; no operating-system shell is launched):
+
+```sh
+python scripts/check_pty_fixture.py /your/scratch/m4-fixture/m4-ssh-fixture.json
+python scripts/test_pty_cleanup.py
+```
+
+`os.openpty` and raw/no-echo mode carry the controlled input/output; ioctl applies
+and reads back kernel window sizes. It verifies `xterm-256color` allocation, cell and pixel window-change dimensions,
+fragmented UTF-8, raw control input, exit status, and literal Docker argv. The peer
+sends ANSI color/cursor output and extended stderr for the Android renderer tests.
+Docker PTY requests are parsed with `shlex.split` and reported as JSON; no Docker,
+shell or provider executable is invoked. M4 diagnostic cases remain unchanged.
+Only a selected synthetic container name is accepted by the PTY exec fixture.
+
+
 ## Build and run Android tests
 
 With JDK 17 and Android SDK configured:

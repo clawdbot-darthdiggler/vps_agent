@@ -1,0 +1,36 @@
+THIRD-PARTY TERMINAL NOTICES — VPS Agent M5
+
+Termux terminal-emulator and terminal-view
+Source: https://github.com/termux/termux-app
+Pinned app tag v0.118.3, commit 5b657c6adf4304e5198951ce815fe0205dcac29c.
+These two terminal libraries are Apache License 2.0 exceptions to the upstream
+repository's GPLv3-only license. See the unmodified UPSTREAM-LICENSE.md and the
+complete Apache-2.0.txt included here. Attribution: Termux terminal component
+contributors and the Terminal Emulator for Android project (Jack Palevich and
+contributors), identified by upstream's license exception. Original source
+attributions are retained. No upstream NOTICE file exists in the pinned tree.
+
+Only needed Java emulator/view classes and view resources are included.
+No Termux application, termux-shared, JNI, native subprocess code, ByteQueue or
+local TerminalSession implementation is included. No libtermux.so is shipped.
+This notice does not change the license of independent VPS Agent application code.
+
+MODIFICATIONS by VPS Agent, 2026-11-03:
+* TerminalView and TerminalViewClient use the new neutral RemoteSession interface
+  instead of the final JNI-coupled local TerminalSession.
+* TerminalSessionClient callback types use RemoteSession.
+* TerminalView is non-final so an app subclass can enforce multiline paste,
+  stale IME, mouse-paste and autofill safety. Rendering/parser algorithms are unchanged.
+* RemoteSession.java and the Android-library Gradle build are new integration code.
+* Main resources from both upstream modules are combined in one Android library.
+* The application's remote adapter rejects OSC52 clipboard read/write callbacks;
+  selection copy and explicit paste are separate user actions.
+Original selected-source hashes are in terminal/upstream-sha256.json in the source
+repository. Modified upstream files carry modification comments.
+
+WcWidth.java includes Unicode tables adapted from jquast/wcwidth at commit
+1b9b6585b0080ea5cb88dc9815796505724793fe, as stated in that source file.
+The complete upstream MIT license and Markus Kuhn permission notice are included
+as wcwidth-LICENSE.txt, fetched from that exact commit. Original attribution:
+Copyright (c) 2014 Jeff Quast <contact@jeffquast.com>.
+Markus Kuhn -- 2007-05-26 (Unicode 5.0).

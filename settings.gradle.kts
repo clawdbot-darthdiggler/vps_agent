@@ -12,4 +12,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "HermesLink"
-include(":app")
+include(":app", ":terminal")

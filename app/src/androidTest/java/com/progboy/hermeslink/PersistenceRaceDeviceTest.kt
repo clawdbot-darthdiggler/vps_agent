@@ -28,6 +28,9 @@ class PersistenceRaceDeviceTest {
         for (method in SettingsStore::class.java.declaredMethods.filter { it.name in operations }) {
             assertTrue("${method.name} must hold the store-wide monitor", Modifier.isSynchronized(method.modifiers))
         }
+        // Keep a real foreground lifetime: another test's delayed background lock
+        // must not intentionally revoke the epochs of these concurrent-save fixtures.
+        val foreground=instrumentation.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val profiles = (1..8).map { AgentProfile(name = "m3-concurrent-save-$it") }
         val pool = Executors.newFixedThreadPool(8)
         try {
@@ -40,7 +43,8 @@ class PersistenceRaceDeviceTest {
             profiles.drop(4).forEach { assertEquals(it, SettingsStore.get(context, it.id)) }
         } finally {
             pool.shutdownNow()
-            profiles.forEach { SettingsStore.delete(context, it.id); SettingsStore.deleteHost(context, "legacy-host-${it.id}") }
+            try { profiles.forEach { SettingsStore.delete(context, it.id); SettingsStore.deleteHost(context, "legacy-host-${it.id}") } }
+            finally { instrumentation.runOnMainSync {foreground.finish()} }
         }
     }
 

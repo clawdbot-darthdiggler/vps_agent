@@ -6,12 +6,17 @@ and saved only under --state-dir (outside the repository). Do not use on a VPS.
 """
 import argparse
 import base64
+import fcntl
+import struct
+import termios
+import tty
 import hashlib
 import io
 import json
 import logging
 import os
 from pathlib import Path
+import shlex
 import signal
 import socket
 import threading
@@ -24,6 +29,8 @@ class FixtureServer(paramiko.ServerInterface):
     def __init__(self, user_key):
         self.user_key = user_key
         self.username = None
+        self.ptys = {}
+        self.pty_lock = threading.Lock()
 
     def get_allowed_auths(self, username):
         return "password,publickey"
@@ -43,9 +50,124 @@ class FixtureServer(paramiko.ServerInterface):
     def check_channel_request(self, kind, chanid):
         return paramiko.OPEN_SUCCEEDED if kind == "session" else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
 
+    def close_pty(self, channel_id):
+        with self.pty_lock:
+            pair = self.ptys.pop(channel_id, None)
+        if pair:
+            for fd in pair:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def close_ptys(self):
+        for channel_id in list(self.ptys):
+            self.close_pty(channel_id)
+
+    def set_size(self, channel, width, height, pixelwidth, pixelheight):
+        with self.pty_lock:
+            pair = self.ptys.get(channel.get_id())
+            if pair is None:
+                raise OSError("PTY already closed")
+            fcntl.ioctl(pair[1], termios.TIOCSWINSZ, struct.pack("HHHH", height, width, pixelwidth, pixelheight))
+            rows, cols, px, py = struct.unpack("HHHH", fcntl.ioctl(pair[1], termios.TIOCGWINSZ, bytes(8)))
+            return cols, rows, px, py
+
+    def check_channel_pty_request(self, channel, term, width, height, pixelwidth, pixelheight, modes):
+        if term != b"xterm-256color" or channel.get_id() in self.ptys:
+            return False
+        pair = os.openpty()
+        tty.setraw(pair[1])  # Raw controls/UTF-8 traverse a real kernel PTY, with echo disabled.
+        with self.pty_lock:
+            self.ptys[channel.get_id()] = pair
+        self.set_size(channel, width, height, pixelwidth, pixelheight)
+        return True
+
+    def check_channel_window_change_request(self, channel, width, height, pixelwidth, pixelheight):
+        try:
+            width, height, pixelwidth, pixelheight = self.set_size(channel, width, height, pixelwidth, pixelheight)
+            channel.sendall(f"\r\nSIZE:{width}x{height}:{pixelwidth}x{pixelheight}\r\n".encode())
+            return True
+        except (EOFError, OSError):
+            return False
+
+    def check_channel_shell_request(self, channel):
+        return self.pty_stream(channel)
+
+    def pty_stream(self, channel, argv=None):
+        pair = self.ptys.get(channel.get_id())
+        if pair is None:
+            return False
+        master, slave = pair
+
+        def through_pty(write_fd, read_fd, data):
+            result = bytearray()
+            # Bound chunks to avoid filling a PTY before its other end is drained.
+            for offset in range(0, len(data), 512):
+                chunk = data[offset:offset + 512]
+                sent = os.write(write_fd, chunk)
+                if sent != len(chunk):
+                    raise OSError("Short controlled PTY write")
+                remaining = sent
+                while remaining:
+                    got = os.read(read_fd, remaining)
+                    if not got:
+                        raise EOFError()
+                    result.extend(got)
+                    remaining -= len(got)
+            return bytes(result)
+
+        def emit(data):
+            channel.sendall(through_pty(slave, master, data))
+
+        def stream():
+            time.sleep(0.05)
+            try:
+                h, w, pw, ph = struct.unpack("HHHH", fcntl.ioctl(slave, termios.TIOCGWINSZ, bytes(8)))
+                emit(f"PTY:{w}x{h}:{pw}x{ph}\r\nKERNEL-PTY:raw\r\n".encode())
+                if argv is not None:
+                    emit(("ARGV:" + json.dumps(argv) + "\r\n").encode())
+                for byte in "é中😀".encode():
+                    emit(bytes([byte]))
+                emit(b"\r\n\x1b[31mRED\x1b[0m\r\nABC\x1b[2DX\r\nREADY\r\n")
+                channel.sendall_stderr(b"EXTENDED-STDERR\r\n")
+                while True:
+                    data = channel.recv(4096)
+                    if not data:
+                        break
+                    data = through_pty(master, slave, data)
+                    if b"\x04" in data:
+                        channel.send_exit_status(7)
+                        break
+                    if b"\x05" in data:
+                        break  # Deliberate disconnect without an exit status.
+                    emit(b"INPUT:" + data.hex().encode() + b"\r\n")
+            except (EOFError, OSError):
+                pass
+            finally:
+                try:
+                    channel.close()
+                except (EOFError, OSError):
+                    pass  # The client may already have closed the transport.
+                finally:
+                    self.close_pty(channel.get_id())
+        threading.Thread(target=stream, daemon=True).start()
+        return True
+
     def check_channel_exec_request(self, channel, command):
         # These are deterministic protocol fixtures, NOT a real Docker installation.
         text = command.decode("utf-8", errors="replace").strip()
+        try:
+            argv = shlex.split(text)
+        except ValueError:
+            argv = []
+        if argv[:3] == ["docker", "exec", "-it"] and self.username == "fixture":
+            rest = argv[3:]
+            if rest[:1] == ["--workdir"] and len(rest) >= 2:
+                rest = rest[2:]
+            if len(rest) >= 3 and rest[:2] == ["--", "test-container"]:
+                return self.pty_stream(channel, argv)
+
         if text in ("true", "/bin/true", "printf ready", "printf 'ready\\n'"):
             result = (b"ready\n", b"", 0)
         elif "docker" in text and self.username == "docker-denied":
@@ -120,18 +242,20 @@ def main():
                 client.close()
             return
         transport = paramiko.Transport(client)
+        server = FixtureServer(user_key)
         try:
             transport.add_server_key(host_key)
             if mode == "unsupported":
                 options = transport.get_security_options()
                 options.kex = ("mlkem768x25519-sha256",)  # Not supported by the app's pinned JSch 0.2.20.
-            transport.start_server(server=FixtureServer(user_key))
+            transport.start_server(server=server)
             while transport.is_active() and not stopping.wait(0.1):
                 pass
         except (paramiko.SSHException, EOFError, OSError):
             pass  # Negative-handshake cases are expected test traffic.
         finally:
             transport.close()
+            server.close_ptys()
             client.close()
 
     def listener(sock, mode):

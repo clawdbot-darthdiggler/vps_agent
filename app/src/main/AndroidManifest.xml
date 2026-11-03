@@ -11,7 +11,7 @@
         android:usesCleartextTraffic="false">
         <activity android:name=".DiagnosticsActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity android:name=".AgentActivity" android:configChanges="orientation|screenSize|keyboardHidden" />
-        <activity android:name=".TerminalActivity" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".TerminalActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
