@@ -7,12 +7,16 @@ import java.security.MessageDigest
 import java.util.Base64
 
 /** Fail closed: only the explicitly configured, out-of-band verified key is accepted. */
-class PinnedHostKeys(private val pin: String) : HostKeyRepository {
+class PinnedHostKeys(private val pin: String, private val keyType: String = "") : HostKeyRepository {
+    @Volatile var mismatch = false; private set
     override fun check(host: String?, key: ByteArray?): Int {
-        if (key == null) return HostKeyRepository.CHANGED
+        if (key == null) { mismatch = true; return HostKeyRepository.CHANGED }
+        if (keyType.isNotEmpty() && try { HostKey(host ?: "", key).type != keyType } catch (_: Exception) { true }) {
+            mismatch = true; return HostKeyRepository.CHANGED
+        }
         val actual = "SHA256:" + Base64.getEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(key))
         return if (MessageDigest.isEqual(actual.toByteArray(Charsets.US_ASCII), pin.trimEnd('=').toByteArray(Charsets.US_ASCII)))
-            HostKeyRepository.OK else HostKeyRepository.CHANGED
+            HostKeyRepository.OK else { mismatch = true; HostKeyRepository.CHANGED }
     }
     override fun add(hostkey: HostKey?, ui: UserInfo?) = Unit
     override fun remove(host: String?, type: String?) = Unit

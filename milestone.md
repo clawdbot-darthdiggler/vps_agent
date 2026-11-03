@@ -8,7 +8,7 @@ The coding manager comes first. A chef-assistant variant is deferred until the s
 
 **Status:** proposed roadmap, not approval of every design choice or a claim that future features exist.
 **Published baseline:** `fa7284380f2c48f3eb391f70e2887f4cca1a6354` on `fix/android-agent-manager`.
-**Current milestone:** M3 implementation, automated verification and independent review are complete; user/real-VPS acceptance remains pending. M4 is next after this handoff. M1/M2 user acceptance remains pending; no phone/VPS test result has been supplied.
+**Current milestone:** M4 implementation, automated verification and independent review are complete. Remaining coding-manager milestones are authorized; M5 terminal feasibility and M6–M9 design discovery are underway. Real-phone/VPS acceptance remains pending. M8 native adapters remain conditional on verified deployment interfaces.
 
 ## Delivery rules
 
@@ -27,8 +27,8 @@ The coding manager comes first. A chef-assistant variant is deferred until the s
 | M1 | Portable Gradle build | Complete | Passed at baseline | Pending on user's development machine |
 | M2 | Initial saved agent connections | Complete, bounded | Passed at baseline | Pending on phone/VPS |
 | M3 | Hosts + Agents manager UI and safe migration | Complete; independent review passed | 11 JVM + 14 API29 device tests passed | Pending |
-| M4 | Connection diagnostics and credential lifecycle | Planned | Not run | Pending |
-| M5 | Interactive SSH/Docker agent terminal | Planned | Not run | Pending |
+| M4 | Connection diagnostics and credential lifecycle | Complete; independent review passed | 24 JVM + 46 API29 device tests, zero skips; lint 0 errors / 38 warnings | Pending real phone/VPS |
+| M5 | Interactive SSH/Docker agent terminal | Component feasibility in progress | Not yet verified | Pending |
 | M6 | Reattachable remote sessions | Planned | Not run | Pending |
 | M7 | Browser connection completion and login UX | Planned | Not run | Pending |
 | M8A | Native Hermes tasks, if supported by deployment | Optional post-MVP, discovery-gated | Not run | Pending |
@@ -93,7 +93,7 @@ Manual acceptance:
 
 **Implementation note:** v3 uses `HostProfile`, `AgentRecord` and `HostAgentState`; the existing flat `AgentProfile` is a resolved transport compatibility object, not the persisted shared-host schema. The proposed dedicated credential-reference vault remains M4 work. Migration keeps encrypted v2 recovery evidence until the first successful v3 mutation, then removes it atomically. Corrupt/future v3 never silently falls back; there is no recovery UI and downgrading is not a supported data rollback. See README for details.
 
-**Verified build:** version 1.1.0 / code 2; clean build, 11 JVM tests and 14 API29 instrumentation tests passed in the parent verification run. Lint: zero errors, 18 warnings (7 dependency-version and 11 localization warnings). Independent review passed with no blocking findings. Source/roadmap changes are not yet committed or published.
+**Verified build:** version 1.1.0 / code 2; clean build, 11 JVM tests and 14 API29 instrumentation tests passed in the parent verification run. Lint: zero errors, 18 warnings (7 dependency-version and 11 localization warnings). Independent review passed with no blocking findings. M3 source/roadmap checkpoint is committed locally as `7bc94df` but is not published.
 
 **Nonblocking follow-up:** add explicit missing-`selectedId` schema rejection, direct concurrent `saveHost`/`saveAgent`/host-delete fixtures, and Activity recreation-during-save coverage. Current editors do not retain unsaved drafts across Activity recreation. These are not claims of failed migration or missing shared-store synchronization.
 
@@ -130,9 +130,11 @@ Implementation slices:
 5. Add redacted diagnostics export with a preview. Treat IPs, usernames, paths, URLs and terminal output as potentially sensitive too.
 
 Automated acceptance:
-- [ ] Controlled SSH fixture covers valid/wrong password, key auth, wrong key/passphrase, host-key mismatch, timeout and unsupported algorithm.
-- [ ] Secrets never enter logs, error text, intents, backups or exported diagnostics.
-- [ ] Forgetting an agent credential does not erase a shared host credential; failed unlock cannot reset the vault.
+- [x] Controlled SSH fixture covers valid/wrong password, key auth, wrong key/passphrase, host-key mismatch, timeout and unsupported algorithm.
+- [x] Automated secret-handling checks and independent review pass for app-generated diagnostics, storage, intents and backup policy. Remote terminal output can contain secrets printed by remote programs.
+- [x] Forgetting an agent credential does not erase a shared host credential; failed unlock cannot reset the vault.
+
+Verification: clean debug/test APK assembly, 24 JVM tests and 46 API29 instrumentation tests passed with zero skips; lint has 0 errors and 38 warnings. Independent final review passed after regression fixes for stale confirmation saves, malformed key import and lock/access/browser continuation races. Controlled fixtures do not establish real VPS/Docker execution, actual dashboard login, other Android versions or real document-provider behavior. RSA PKCS#1 PEM only; local gate is opt-in UI authentication, not per-use cryptographic authorization.
 
 Hands-on acceptance:
 - [ ] Test actual Hostinger SSH policy through Tailscale; distinguish ordinary password/key SSH from any Tailscale SSH authentication flow.

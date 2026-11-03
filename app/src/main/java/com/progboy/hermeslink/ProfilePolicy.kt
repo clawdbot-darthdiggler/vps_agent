@@ -16,8 +16,13 @@ data class AgentProfile(
     val container: String = "",
     val webUrl: String = "",
     val basicUser: String = "",
-    val basicPassword: String = ""
-)
+    val basicPassword: String = "",
+    val authMethod: String = "password", val privateKeyPem: String = "", val keyPassphrase: String = "",
+    val hostKeyType: String = ""
+) {
+    internal val sessionEpoch = VaultSession.epoch()
+    override fun toString() = "AgentProfile(redacted)"
+}
 
 object ProfilePolicy {
     fun webError(url: String): String? = try {
@@ -47,6 +52,7 @@ object ProfilePolicy {
 
 class BoundedOutput(private val limit: Int = 32768) {
     private val buffer = StringBuilder()
+    fun clear() { buffer.setLength(0) }
     fun append(text: String): String {
         buffer.append(text.takeLast(limit))
         if (buffer.length > limit) buffer.delete(0, buffer.length - limit)

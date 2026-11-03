@@ -12,15 +12,14 @@ import java.io.OutputStream
 import kotlin.concurrent.thread
 
 /** Bounded, line-oriented SSH shell; deliberately not a terminal emulator. */
-class TerminalActivity : AppCompatActivity() {
+class TerminalActivity : SecureActivity() {
     private lateinit var outputView: TextView
     private lateinit var input: EditText
     private lateinit var send: Button
     private val output = BoundedOutput()
     private val lock = Any()
     private var generation = 0
-    private var session: Session? = null
-    private var channel: Channel? = null
+    private var operation: ConnectionOperation? = null
     private var writer: OutputStream? = null
     private var connection: Job? = null
     private var writeJob: Job? = null
@@ -36,10 +35,11 @@ class TerminalActivity : AppCompatActivity() {
         button("Connect VPS shell") { connect(false) }
         button("Launch configured Docker /bin/sh") { connect(true) }
         button("Disconnect") { disconnect(); append("\n[Disconnected]\n") }
-        outputView = TextView(this).apply { typeface = android.graphics.Typeface.MONOSPACE; setTextIsSelectable(true) }
+        outputView = TextView(this).apply { isSaveEnabled = false; importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS; typeface = android.graphics.Typeface.MONOSPACE; setTextIsSelectable(true) }
         root.addView(ScrollView(this).apply { addView(outputView) }, LinearLayout.LayoutParams(-1, 0, 1f))
         input = EditText(this).apply {
             hint = "One shell command line"; isSingleLine = true; isSaveEnabled = false
+            importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             filters = arrayOf(android.text.InputFilter.LengthFilter(4096))
         }
@@ -64,71 +64,27 @@ class TerminalActivity : AppCompatActivity() {
                 if (validation != null) { append("[$validation]\n"); return@launch }
                 val command = if (docker) ProfilePolicy.dockerCommand(p.container) else null
                 if (docker && command == null) { append("[Save a valid explicit Docker container name first.]\n"); return@launch }
-                append("[Connecting to ${p.sshHost}:${p.sshPort}; checking pinned key…]\n")
-                withContext(Dispatchers.IO) {
-                    val ssh = JSch().apply { setHostKeyRepository(PinnedHostKeys(p.sshPin)) }
-                        .getSession(p.sshUser, p.sshHost, p.sshPort)
-                    var ch: Channel? = null
-                    try {
-                        synchronized(lock) {
-                            if (generation != token) throw CancellationException()
-                            session = ssh
-                        }
-                        ssh.setConfig("StrictHostKeyChecking", "yes")
-                        ssh.setConfig("PreferredAuthentications", "password")
-                        ssh.setPassword(p.sshPassword)
-                        ssh.setServerAliveInterval(15000)
-                        ssh.setServerAliveCountMax(2)
-                        ssh.connect(10000)
-                        ensureActive()
-                        ch = if (docker) (ssh.openChannel("exec") as ChannelExec).apply {
-                            setCommand(command!!); setPty(false)
-                            // Merge bounded stderr into the same input stream via JSch's extended stream below.
-                        } else (ssh.openChannel("shell") as ChannelShell).apply { setPty(false) }
-                        val activeChannel = ch
-                        val stream = activeChannel.inputStream
-                        val errors = activeChannel.extInputStream
-                        val sink = activeChannel.outputStream
-                        synchronized(lock) {
-                            if (generation != token) throw CancellationException()
-                            channel = activeChannel
-                        }
-                        activeChannel.connect(10000)
-                        synchronized(lock) {
-                            if (generation != token) throw CancellationException()
-                            writer = sink
-                        }
-                        withContext(Dispatchers.Main) { send.isEnabled = true; append("[Connected: ${if (docker) "Docker shell" else "VPS shell"}]\n") }
-                        // Poll both streams; avoids unbounded readLine and stderr pipe deadlocks.
-                        val bytes = ByteArray(2048)
-                        val sources = listOf(stream to StreamTextDecoder(), errors to StreamTextDecoder())
-                        while (isActive) {
-                            var readAny = false
-                            for ((source, decoder) in sources) {
-                                val available = source.available()
-                                if (available > 0) {
-                                    val count = source.read(bytes, 0, minOf(bytes.size, available))
-                                    if (count > 0) {
-                                        readAny = true
-                                        val text = decoder.append(bytes, count)
-                                        withContext(Dispatchers.Main) { if (generation == token) append(text) }
-                                    }
-                                }
-                            }
-                            if (!readAny && activeChannel.isClosed) break
-                            if (!readAny) delay(50)
-                        }
-                    } finally {
-                        ch?.disconnect(); ssh.disconnect()
-                        synchronized(lock) {
-                            if (generation == token) { channel = null; session = null; writer = null }
-                        }
-                    }
+                append("[Connecting; checking saved key type and fingerprint…]\n")
+                val op = ConnectionOperation()
+                synchronized(lock) {
+                    if (generation != token) throw CancellationException()
+                    operation = op
                 }
+                LineShellService().run(p, docker, op,
+                    connected = { sink -> withContext(Dispatchers.Main) {
+                        synchronized(lock) {
+                            if (generation != token) throw CancellationException()
+                            writer = sink; send.isEnabled = true
+                            append("[Connected: ${if (docker) "Docker shell" else "VPS shell"}]\n")
+                        }
+                    } },
+                    output = { text -> withContext(Dispatchers.Main) { if (generation == token) append(text) } })
                 if (generation == token) append("\n[Remote shell closed]\n")
             } catch (e: CancellationException) { throw e
+            } catch (e: ConnectionFailure) {
+                if (generation == token) append("\n[${e.stage}: ${e.code}. ${e.code.action}]\n")
             } catch (_: Exception) {
-                if (generation == token) append("\n[Connection failed. Check Tailscale/network, credentials and verified host key pin. Keys are never accepted automatically.]\n")
+                if (generation == token) append("\n[Shell channel could not open or was lost. Verify account shell/container permissions.]\n")
             } finally { if (generation == token) send.isEnabled = false }
         }
     }
@@ -141,7 +97,7 @@ class TerminalActivity : AppCompatActivity() {
         input.setText("")
         // Do not echo commands: users may type secrets.
         writeJob = lifecycleScope.launch {
-            try { withContext(Dispatchers.IO) { sink.write((line + "\n").toByteArray(Charsets.UTF_8)); sink.flush() } }
+            try { LineShellService().sendLine(sink, line) }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) {
                 // A cancelled blocking write may still throw after a replacement connects.
@@ -157,16 +113,22 @@ class TerminalActivity : AppCompatActivity() {
     private fun disconnect() {
         val resources = synchronized(lock) {
             generation++
-            val old = channel to session
-            channel = null; session = null; writer = null
+            val old = operation
+            operation = null; writer = null
             old
         }
         connection?.cancel(); writeJob?.cancel()
         if (::send.isInitialized) send.isEnabled = false
         // Disconnect blocking I/O even after lifecycleScope is cancelled.
         thread(name = "ssh-disconnect", isDaemon = true) {
-            try { resources.first?.disconnect() } finally { resources.second?.disconnect() }
+            resources?.cancel()
         }
+    }
+    override fun onVaultReady() = Unit
+    override fun onVaultLocked() {
+        disconnect()
+        if (::input.isInitialized) input.setText("")
+        if (::outputView.isInitialized) { output.clear(); outputView.text = "Locked; connection closed and output cleared." }
     }
     override fun onStop() { disconnect(); super.onStop() }
     override fun onDestroy() { disconnect(); super.onDestroy() }
